@@ -52,5 +52,21 @@ async def upload_file(file: UploadFile):
         return {"error": "No AWS credentials found"}
 
 
+@app.post("/file_link")
+async def file_link(file_name: str):
+    try:
+        url = s3.generate_presigned_url(
+            ClientMethod='get_object',
+            Params={
+                'Bucket': BUCKET_NAME,
+                'Key': file_name
+            },
+            ExpiresIn=300
+        )
+        return {"url": url}
+    except NoCredentialsError:
+        return {"error": "No AWS credentials found"}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host='0.0.0.0', port=8000)
