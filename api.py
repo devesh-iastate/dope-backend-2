@@ -4,8 +4,10 @@ import boto3 as boto3
 from botocore.exceptions import NoCredentialsError
 from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 import uvicorn
 
+load_dotenv()
 app = FastAPI()
 
 origins = ['*']

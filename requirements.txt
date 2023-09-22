@@ -3,3 +3,4 @@ uvicorn
 botocore
 boto3
 python-multipart
+python-dotenv
