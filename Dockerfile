@@ -1,7 +1,6 @@
 FROM python:3.10
 
 WORKDIR /src
-ADD ./../.env /src
 ADD ./ /src
 
 RUN pip install --upgrade pip
