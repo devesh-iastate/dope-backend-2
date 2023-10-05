@@ -1,11 +1,14 @@
+import json
 import os
 
 import boto3 as boto3
 from botocore.exceptions import NoCredentialsError
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import uvicorn
+import aiohttp
 
 load_dotenv()
 app = FastAPI()
@@ -24,8 +27,12 @@ app.add_middleware(
 ACCESS_KEY = os.getenv('ACCESS_KEY')
 SECRET_KEY = os.getenv('SECRET_KEY')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
+admin_username = os.getenv('admin_username')
+admin_apiKey = os.getenv('admin_apiKey')
+GROUP_ID = os.getenv('GROUP_ID')
+APP_ID = os.getenv('APP_ID')
 
-s3 = boto3.client(
+client = boto3.client(
     's3',
     # Replace with your Spaces region's endpoint
     endpoint_url='https://nyc3.digitaloceanspaces.com',
@@ -34,36 +41,65 @@ s3 = boto3.client(
 )
 
 
-@app.get("/")
-async def root():
-    return {"message": "Hello from Fastapi"}
+async def verify_token(user_token):
+    admin_token_url = "https://realm.mongodb.com/api/admin/v3.0/auth/providers/mongodb-cloud/login"
+    data = {
+        "username": admin_username,
+        "apiKey": admin_apiKey
+    }
+    async with aiohttp.ClientSession() as session:
+
+        async with session.post(admin_token_url, json=data) as response:
+            if response.status == 200:
+                admin_token = await response.json()
+            else:
+                return response
+        admin_access_token = admin_token["access_token"]
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + admin_access_token
+    }
+    payload = json.dumps({
+        "token": user_token
+    })
+    client_verify_token_url = f"https://realm.mongodb.com/api/admin/v3.0/groups/{GROUP_ID}/apps/{APP_ID}/users/verify_token"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(client_verify_token_url, headers=headers, data=payload) as response:
+            if response.status == 200:
+                return 200
+            else:
+                return response
+
 
 
 @app.post("/upload_file/")
-async def upload_file(file: UploadFile):
+async def upload_file(folder: str = Form(...), token: str = Form(...), file: UploadFile = File(...)):
     try:
-        s3.upload_fileobj(
-            file.file,
-            BUCKET_NAME,
-            file.filename,
-        )
-        return {"message": "File uploaded successfully"}
-    except NoCredentialsError:
-        return {"error": "No AWS credentials found"}
+        # Check if the folder exists
+        token_status = await verify_token(token)
+        if token_status != 200:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        folder_exists = False
+        for obj in client.list_objects(Bucket=BUCKET_NAME)['Contents']:
+            if obj['Key'].startswith(folder + '/'):
+                folder_exists = True
+                break
 
+        # If folder does not exist, create it
+        if not folder_exists:
+            client.put_object(Bucket=BUCKET_NAME, Key=(folder + '/'))
 
-@app.post("/file_link")
-async def file_link(file_name: str):
-    try:
-        url = s3.generate_presigned_url(
-            ClientMethod='get_object',
-            Params={
-                'Bucket': BUCKET_NAME,
-                'Key': file_name
-            },
-            ExpiresIn=300
-        )
-        return {"url": url}
+        # Upload the file to the folder
+        file_content = await file.read()
+        file_key = f'{folder}/{file.filename}'
+        client.put_object(Bucket=BUCKET_NAME, Key=file_key, Body=file_content)
+
+        # Generate a presigned URL for downloading the file
+        url = client.generate_presigned_url('get_object',
+                                            Params={'Bucket': BUCKET_NAME, 'Key': file_key}
+                                            )
+
+        return JSONResponse(content={"message": "File uploaded successfully!", "url": url}, status_code=200)
     except NoCredentialsError:
         return {"error": "No AWS credentials found"}
 
