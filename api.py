@@ -1,14 +1,14 @@
 import json
 import os
 
+import aiohttp
 import boto3 as boto3
+import uvicorn
 from botocore.exceptions import NoCredentialsError
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, Form
+from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
-import uvicorn
-import aiohttp
 
 load_dotenv()
 app = FastAPI()
@@ -71,7 +71,6 @@ async def verify_token(user_token):
                 return response
 
 
-
 @app.post("/upload_file/")
 async def upload_file(folder: str = Form(...), token: str = Form(...), file: UploadFile = File(...)):
     try:
@@ -80,6 +79,7 @@ async def upload_file(folder: str = Form(...), token: str = Form(...), file: Upl
         if token_status != 200:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         folder_exists = False
+
         for obj in client.list_objects(Bucket=BUCKET_NAME)['Contents']:
             if obj['Key'].startswith(folder + '/'):
                 folder_exists = True
@@ -94,6 +94,25 @@ async def upload_file(folder: str = Form(...), token: str = Form(...), file: Upl
         file_key = f'{folder}/{file.filename}'
         client.put_object(Bucket=BUCKET_NAME, Key=file_key, Body=file_content)
 
+        # Generate a presigned URL for downloading the file
+        url = client.generate_presigned_url('get_object',
+                                            Params={'Bucket': BUCKET_NAME, 'Key': file_key},
+                                            ExpiresIn=604800
+                                            )
+
+        return JSONResponse(content={"message": "File uploaded successfully!", "url": url}, status_code=200)
+    except NoCredentialsError:
+        return {"error": "No AWS credentials found"}
+
+
+@app.get("/upload_file/")
+async def get_file(file_path: str = Form(...), token: str = Form(...)):
+    try:
+        # Check if the folder exists
+        token_status = await verify_token(token)
+        if token_status != 200:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        file_key = file_path
         # Generate a presigned URL for downloading the file
         url = client.generate_presigned_url('get_object',
                                             Params={'Bucket': BUCKET_NAME, 'Key': file_key}
