@@ -74,7 +74,7 @@ async def verify_token(user_token):
                 return response
 
 
-@app.post("/upload_file/")
+@app.post("/api/upload_file/")
 async def upload_file(folder: str = Form(...), token: str = Form(...), file: UploadFile = File(...)):
     try:
         # Check if the folder exists
@@ -109,7 +109,7 @@ async def upload_file(folder: str = Form(...), token: str = Form(...), file: Upl
         return {"error": "No AWS credentials found"}
 
 
-@app.post("/generate_download_link/")
+@app.post("/api/generate_download_link/")
 async def generate_download_link(request: Request):
     body = await request.json()
     file_path = body.get('filePath')
@@ -131,7 +131,7 @@ async def generate_download_link(request: Request):
         return {"error": str(e)}
 
 
-@app.post("/download_folder/")
+@app.post("/api/download_folder/")
 async def download_folder(request: Request):
     try:
         body = await request.json()
