@@ -6,9 +6,12 @@ import boto3 as boto3
 import uvicorn
 from botocore.exceptions import NoCredentialsError
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, HTTPException, status, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, Form, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+import zipfile
 
 load_dotenv()
 app = FastAPI()
@@ -94,31 +97,68 @@ async def upload_file(folder: str = Form(...), token: str = Form(...), file: Upl
         file_key = f'{folder}/{file.filename}'
         client.put_object(Bucket=BUCKET_NAME, Key=file_key, Body=file_content)
 
-        # Generate a presigned URL for downloading the file
-        url = client.generate_presigned_url('get_object',
-                                            Params={'Bucket': BUCKET_NAME, 'Key': file_key},
-                                            ExpiresIn=604800
-                                            )
+        # Save file in local folder
+        local_folder_path = '/lss/baskarg-lab/onr-organic-muri/backup/' + folder
+        os.makedirs(local_folder_path, exist_ok=True)
+        local_file_path = os.path.join(local_folder_path, file.filename)
+        with open(local_file_path, 'wb') as local_file:
+            local_file.write(file_content)
 
-        return JSONResponse(content={"message": "File uploaded successfully!", "url": url}, status_code=200)
+        return JSONResponse(content={"message": "File uploaded successfully!"}, status_code=200)
     except NoCredentialsError:
         return {"error": "No AWS credentials found"}
 
 
-@app.get("/upload_file/")
-async def get_file(file_path: str = Form(...), token: str = Form(...)):
+@app.post("/generate_download_link/")
+async def generate_download_link(request: Request):
+    body = await request.json()
+    file_path = body.get('filePath')
+    token = body.get('token')
+    # Verify the token
+    token_status = await verify_token(token)
+    if token_status != 200:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    # Generate a presigned URL for downloading the file
     try:
-        # Check if the folder exists
+        url = client.generate_presigned_url('get_object',
+                                            Params={'Bucket': BUCKET_NAME, 'Key': file_path}, ExpiresIn=604800
+                                            )
+        return JSONResponse(content={"url": url}, status_code=200)
+
+    except Exception as e:
+        print(str(e))
+        return {"error": str(e)}
+
+
+@app.post("/download_folder/")
+async def download_folder(request: Request):
+    try:
+        body = await request.json()
+        folder = body.get('folder')
+        print(folder)
+        token = body.get('token')
         token_status = await verify_token(token)
         if token_status != 200:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        file_key = file_path
-        # Generate a presigned URL for downloading the file
-        url = client.generate_presigned_url('get_object',
-                                            Params={'Bucket': BUCKET_NAME, 'Key': file_key}
-                                            )
 
-        return JSONResponse(content={"message": "File uploaded successfully!", "url": url}, status_code=200)
+        # Create a BytesIO object to store the zip file
+        in_memory_zip = BytesIO()
+
+        with zipfile.ZipFile(in_memory_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for obj in client.list_objects(Bucket=BUCKET_NAME, Prefix=f"{folder}/")['Contents']:
+                file_key = obj['Key']
+                file_obj = client.get_object(Bucket=BUCKET_NAME, Key=file_key)
+                file_data = file_obj['Body'].read()
+                zf.writestr(file_key, file_data)
+
+        in_memory_zip.seek(0)
+
+        headers = {
+            'Content-Disposition': f'attachment; filename={folder}.zip'
+        }
+
+        return Response(content=in_memory_zip.getvalue(), media_type="application/zip", headers=headers)
     except NoCredentialsError:
         return {"error": "No AWS credentials found"}
 
