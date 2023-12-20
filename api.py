@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException, status, Form, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.responses import StreamingResponse
+
 from io import BytesIO
 import zipfile
 
@@ -26,7 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Replace these with your DigitalOcean Spaces credentials
+# Replace these with your DigitalOcean Spaces credentials andMongoDB Realm credentials
 ACCESS_KEY = os.getenv('ACCESS_KEY')
 SECRET_KEY = os.getenv('SECRET_KEY')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
@@ -35,6 +35,7 @@ admin_apiKey = os.getenv('admin_apiKey')
 GROUP_ID = os.getenv('GROUP_ID')
 APP_ID = os.getenv('APP_ID')
 
+# boto3 client for interacting with AWS S3 (DigitalOcean Spaces in this case)
 client = boto3.client(
     's3',
     # Replace with your Spaces region's endpoint
@@ -44,6 +45,7 @@ client = boto3.client(
 )
 
 
+# Async function to verify user token using MongoDB Realm
 async def verify_token(user_token):
     admin_token_url = "https://realm.mongodb.com/api/admin/v3.0/auth/providers/mongodb-cloud/login"
     data = {
@@ -74,6 +76,7 @@ async def verify_token(user_token):
                 return response
 
 
+# FastAPI route for uploading files to DigitalOcean Spaces
 @app.post("/api/upload_file/")
 async def upload_file(folder: str = Form(...), token: str = Form(...), file: UploadFile = File(...)):
     try:
@@ -109,6 +112,7 @@ async def upload_file(folder: str = Form(...), token: str = Form(...), file: Upl
         return {"error": "No AWS credentials found"}
 
 
+# FastAPI route for generating a downloadable link for a file
 @app.post("/api/generate_download_link/")
 async def generate_download_link(request: Request):
     body = await request.json()
@@ -131,6 +135,7 @@ async def generate_download_link(request: Request):
         return {"error": str(e)}
 
 
+# FastAPI route for downloading an entire folder as a zip file
 @app.post("/api/download_folder/")
 async def download_folder(request: Request):
     try:
@@ -163,5 +168,6 @@ async def download_folder(request: Request):
         return {"error": "No AWS credentials found"}
 
 
+# Entry point for running the application with uvicorn
 if __name__ == "__main__":
     uvicorn.run(app, host='0.0.0.0', port=8000)
